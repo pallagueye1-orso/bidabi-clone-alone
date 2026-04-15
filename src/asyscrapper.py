@@ -4,14 +4,14 @@ import csv
 import os
 from aiohttp import ClientSession, ClientTimeout
 
-API_URL = "https://world.openfoodfacts.org/cgi/search.pl"
+API_URL = "https://world.openfoodfacts.org/api/v2/search"
 HEADERS = {"User-Agent": "MyAwesomeApp/1.0"}
 
 OUTPUT_DIR = "data"
 
-CATEGORY = "sugar" #"bread", "milk", "champagnes", "butter" 
+CATEGORY = "sugars" #"bread", "milk", "champagnes", "butter" 
 TARGET_COUNT = 180
-PAGE_SIZE = 100
+PAGE_SIZE = 200
 MAX_PAGES = 50
 
 MAX_CONCURRENT_REQUESTS = 10
@@ -52,29 +52,36 @@ def extract_product_info(product):
 # -------------------------
 async def fetch_page(session, category, page, page_size, sem):
     params = {
-        "action": "process",
-        "tagtype_0": "categories",
-        "tag_contains_0": "contains",
-        "tag_0": category,
+        "categories_tags_en": category,
         "page": page,
-        "page_size": page_size,
-        "json": 1
+        "page_size": page_size
     }
 
     async with sem:
-        try:
-            async with session.get(API_URL, params=params) as resp:
-                data = await resp.json()
-                return data.get("products", [])
-        except Exception as e:
-            print(f"⚠ Erreur API page {page} :", e)
-            return []
+        for attempt in range(3):  # Retry up to 3 times
+            try:
+                async with session.get(API_URL, params=params) as resp:
+                    if resp.status != 200:
+                        print(f"⚠ Erreur HTTP {resp.status} pour page {page}, tentative {attempt+1}")
+                        if attempt < 2:
+                            await asyncio.sleep(1)  # Wait 1 second before retry
+                            continue
+                        return []
+                    data = await resp.json()
+                    return data.get("products", [])
+            except Exception as e:
+                print(f"⚠ Erreur API page {page}, tentative {attempt+1} :", e)
+                if attempt < 2:
+                    await asyncio.sleep(1)
+                    continue
+                return []
+        return []
 
 
 # -------------------------
 # Async image download
 # -------------------------
-async def download_image(session, url, image_id, sem, folder="data/images/sugar"):
+async def download_image(session, url, image_id, sem, folder):
     if not url:
         return
 
@@ -104,18 +111,26 @@ async def scrape(category, target_count, page_size, max_pages):
     sem_api = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
     sem_img = asyncio.Semaphore(MAX_CONCURRENT_IMAGES)
 
+    folder = f"data/raw/images/{category.replace(':', '-')}"
+
     async with ClientSession(headers=HEADERS, timeout=timeout) as session:
         valid_products = []
         image_tasks = []
         page = 1
+        consecutive_empty = 0
 
         while len(valid_products) < target_count and page <= max_pages:
             print(f"→ Téléchargement page {page}…")
 
             products = await fetch_page(session, category, page, page_size, sem_api)
             if not products:
-                print("Aucun produit trouvé sur cette page.")
-                break
+                consecutive_empty += 1
+                print(f"Aucune produit trouvé sur cette page. Consecutive empty: {consecutive_empty}")
+                if consecutive_empty >= 3:
+                    print("Trop de pages vides consécutives, arrêt.")
+                    break
+            else:
+                consecutive_empty = 0
 
             for product in products:
                 if is_valid_product(product):
@@ -126,7 +141,7 @@ async def scrape(category, target_count, page_size, max_pages):
                     image_id = info[0]
 
                     task = asyncio.create_task(
-                        download_image(session, image_url, image_id, sem_img)
+                        download_image(session, image_url, image_id, sem_img, folder)
                     )
                     image_tasks.append(task)
 
@@ -154,7 +169,7 @@ def save_to_csv(filename, rows):
 # -------------------------
 def main():
     products = asyncio.run(scrape(CATEGORY, TARGET_COUNT, PAGE_SIZE, MAX_PAGES))
-    output_file = f"{OUTPUT_DIR}/metadata_{CATEGORY}_{TARGET_COUNT}.csv"
+    output_file = f"data/raw/metadata_{CATEGORY}_{TARGET_COUNT}.csv"
     save_to_csv(output_file, products)
     print(f"✔ Fichier {output_file} créé. Produits valides collectés : {len(products)}")
 
