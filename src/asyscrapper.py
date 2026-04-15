@@ -9,7 +9,7 @@ HEADERS = {"User-Agent": "MyAwesomeApp/1.0"}
 
 OUTPUT_DIR = "data"
 
-CATEGORY = "sugars" #"bread", "milk", "champagnes", "butter" 
+CATEGORY = "butter" #"bread", "milk", "champagnes", "butter" 
 TARGET_COUNT = 180
 PAGE_SIZE = 200
 MAX_PAGES = 50
