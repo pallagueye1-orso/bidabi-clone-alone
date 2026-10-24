@@ -69,7 +69,8 @@ Structure :
 
 data/raw/images/<categorie>/
 
-Nombre total d’images : (mettre ton nombre)
+Les images ont été collectées par scraping et rangées par catégorie.
+Le nombre exact d’images n’est plus disponible.
 
 ## Installation
 
